@@ -717,32 +717,28 @@ class CustomEvalCallback(EvalCallback):
     def _on_step(self) -> bool:
         """Process evaluation step and optionally visualize new best models"""
         # Store information about the best model before calling the parent method
-        best_model_exists_before = hasattr(self, 'best_model_path') and self.best_model_path is not None
-        previous_best_model_path = self.best_model_path if best_model_exists_before else None
+        best_model_exists_before = self.best_model_save_path is not None and hasattr(self, 'best_mean_reward') and self.best_mean_reward is not None
         previous_mean_reward = getattr(self, 'best_mean_reward', None)
         
         # Call parent method for standard evaluation
         result = super()._on_step()
         
-        # Determina se un nuovo best model è stato salvato controllando sia il path che il reward
-        current_best_exists = hasattr(self, 'best_model_path') and self.best_model_path is not None
+        # Determina se un nuovo best model è stato salvato controllando il reward
+        current_best_exists = self.best_model_save_path is not None and hasattr(self, 'best_mean_reward') and self.best_mean_reward is not None
         current_mean_reward = getattr(self, 'best_mean_reward', None)
         
         # Un nuovo best model è stato salvato se:
         # 1. Prima non esisteva ed ora esiste, oppure
-        # 2. Il reward è migliorato, oppure
-        # 3. Il percorso è cambiato
+        # 2. Il reward è migliorato
         new_best_model_saved = (
             (not best_model_exists_before and current_best_exists) or
             (current_mean_reward is not None and previous_mean_reward is not None and 
-             current_mean_reward > previous_mean_reward) or
-            (previous_best_model_path != self.best_model_path and current_best_exists)
+             current_mean_reward > previous_mean_reward)
         )
         
         # Aggiungiamo log dettagliati per il debug
         if new_best_model_saved:
             self.custom_logger.info(f"New best model detected! Previous reward: {previous_mean_reward}, Current reward: {current_mean_reward}")
-            self.custom_logger.info(f"Previous path: {previous_best_model_path}, Current path: {self.best_model_path}")
         
         # Se un nuovo best model è stato salvato, salviamo SEMPRE le statistiche VecNormalize
         if new_best_model_saved and self.best_model_save_path:

@@ -9,78 +9,17 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 import pandas as pd  # <<< ASSICURATI CHE QUESTA RIGA SIA QUI ALL'INIZIO DEL FILE
 import tensorflow as tf # <<< ANCHE QUESTA SE USI TF GLOBALMENTE
+import traceback
 
-PIXELS_PER_KM = 1 
-WEIGHT_VERTICAL_CONTROL_ORIENTATION = 2 # Esempio, da tarare!
-VERTICAL_CONTROL_DEADZONE_PX = 5.0      # Non applicare se molto vicino verticalmente
-MAX_RADIAL_SPEED_FOR_BONUS_CONSIDERATION = 0.05 # Considera solo se la velocità radiale non è eccessiva
-WEIGHT_REWARD_DERIVATIVE = 0.1
-
-
-WEIGHT_VELOCITY_VECTOR_ERROR_PENALTY = 0.05
-MIN_EPISODE_SCORE_FOR_TRUNCATION = -10000.0 
-# Bonus per l'avvicinamento al marker (shaping reward)
-WEIGHT_APPROACHING_MARKER_BONUS_PER_PIXEL = 0.5  # Esempio: 0.5 punti per ogni pixel di avvicinamento
-                                               # Sintonizzalo attentamente!
-
-# Bonus per la precisione dell'atterraggio vicino al marker (terminal reward)
-WEIGHT_PRECISION_LANDING_BONUS_MAX = 5000.0     # Bonus massimo se atterra esattamente sul marker
-MAX_DIST_FOR_PRECISION_BONUS_PX = 10.0          # Distanza massima dal marker per ricevere parte di questo bonus (in pixel)
-MIN_DIST_FOR_MAX_PRECISION_BONUS_PX = 2.0 
-PROJECTION_UPDATE_RATE = 1
-WEIGHT_SPATIAL_PROXIMITY_TO_REF_PATH = 0.05  # Bonus base per la vicinanza alla forma della traiettoria NN
-
-# Fattore di decadimento per la ricompensa di prossimità (un valore più piccolo significa decadimento più rapido)
-PROXIMITY_DECAY_FACTOR = 0.005 # Es: exp(-0.01 * distance)
-NN_PATH_CORRIDOR_RADIUS = 15
-WEIGHT_VELOCITY_ALIGNMENT_WITH_REF_PATH =  0.1# Bonus per allineare la velocità con la direzione locale della traiettoria NN
-WEIGHT_DEVIATE_NN_PATH_PENALTY = -0.05   # Penalità per pixel per cui si sfora NN_PATH_CORRIDOR_RADIUS (deve essere negativo)
-WEIGHT_PROGRESS_ALONG_PATH_SHAPE = 2
-# Soglia per considerare la traiettoria NN completata spazialmente (per il bonus una tantum)
-REF_TRAJ_END_REACH_THRESHOLD_PX = 300.0
-
-# --- Costanti Fisiche e di Gioco ---
+# --- COSTANTI DI GIOCO E FISICA ---
 SCREEN_WIDTH = 1200
 SCREEN_HEIGHT = 800
 CENTER_X = SCREEN_WIDTH // 2
 CENTER_Y = SCREEN_HEIGHT // 2
-WEIGHT_TIME_PENALTY = 0.001  # Da 0.08 a 0.05            # AUMENTATO DRASTICAMENTE (da 0.005)
-MAX_RADIAL_SPEED_FINAL_LANDING = -1
-# --- NUOVI PESI RICOMPENSA PER AGENTE RL CHE SEGUE TRAIETTORIA NN ---
-WEIGHT_NN_WAYPOINT_DISTANCE_REDUCTION = 5*0 # Bonus per ridurre la distanza al waypoint NN
-WEIGHT_NN_WAYPOINT_REACHED = 20.0 * 0     # Bonus elevato per aver raggiunto un waypoint NN
-WEIGHT_NN_TRAJECTORY_COMPLETED = 1000.0    # Bonus per aver completato l'intera traiettoria NN
-WEIGHT_DEVIATION_FROM_NN_PATH = -0.05     # Penalità (per pixel) se troppo lontano dal segmento corrente della traiettoria NN
-MAX_ALLOWED_DEVIATION_NN_PATH = 30.0     # Distanza in pixel oltre la quale si applica una forte penalità
-WEIGHT_FINAL_LANDING_SPEED_REDUCTION = 150.0
-WEIGHT_FINAL_LANDING_ANGLE_ALIGNMENT = 200.0
-WEIGHT_EXCESSIVE_FINAL_DESCENT_SPEED_PENALTY = 5.0 
-
-WEIGHT_FUEL_EMPTY_PENALTY = 1000.0                # AUMENTATO SIGNIFICATIVAMENTE
-WEIGHT_FUEL_CONSUMPTION_PENALTY_PER_UNIT = 0.06 # NUOVO: Penalità per unità di carburante consumato
-
-# Scala per normalizzare le coordinate relative al waypoint
-WAYPOINT_COORD_SCALE_XY = SCREEN_WIDTH # o SCREEN_HEIGHT, scegli una scala ragionevole
-WAYPOINT_VEL_SCALE = 15.0 # Scala per normalizzare le velocità relative al waypoint
-
-
-WEIGHT_TRAJECTORY_SIMILARITY = 2.0 # (Dal tuo snippet)
-MAX_EXPECTED_DEVIATION = 50.0   # (Dal tuo snippet)
-WEIGHT_EXCESSIVE_DEVIATION = 0.5    # (Dal tuo snippet, da applicare come penalità)
-MAX_ALLOWED_DEVIATION = 30.0      # (Dal tuo snippet)
-REF_TRAJ_END_REACH_THRESHOLD_PX = 60.0 # Per bonus completamento spaziale
-
-# --- FATTORI DI SCALA SPRITE ---
-SHIP_SCALE_FACTOR = 0.2
-MOON_SCALE_FACTOR = 1
-FLAME_SCALE_FACTOR = 0.08
-BACKGROUND_SCALE_FACTOR = 0.8
-
-
 
 GRAVITY_CONST = 10000
 TIME_STEP = 0.1
-MAIN_THRUST_FORCE = 100.0 # Potrebbe essere necessario regolarlo per hover fine
+MAIN_THRUST_FORCE = 100.0
 ROTATION_THRUST_TORQUE = 350
 
 DRY_MASS = 50.0
@@ -96,21 +35,89 @@ DEFAULT_MOON_RADIUS = 171.5
 DEFAULT_SHIP_W = 89
 DEFAULT_SHIP_H = 87
 
+MAX_STEPS_PER_EPISODE = 4000
+
+# --- COSTANTI SPRITE ---
+SHIP_SCALE_FACTOR = 0.2
+MOON_SCALE_FACTOR = 1
+FLAME_SCALE_FACTOR = 0.08
+BACKGROUND_SCALE_FACTOR = 0.8
+
+# --- COSTANTI COLORI ---
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+BLUE = (0, 0, 255)
+GRAY = (128, 128, 128)
+YELLOW = (255, 255, 0)
+ORANGE = (255, 165, 0)
+PURPLE = (128, 0, 128)
+CYAN = (0, 255, 255)
+DARK_GRAY = (50, 50, 50)
+LIGHT_GREEN = (144, 238, 144)
+DARK_RED = (139, 0, 0)
+
+# --- COSTANTI END
+EIGHT_CRASH_PENALTY = 150
+WEIGHT_OOB_PENALTY = 150
+WEIGHT_TIMEOUT_PENALTY = 100
+WEIGHT_FUEL_EMPTY_PENALTY = 100
+
+# --- COSTANTI REWARD ---
+WEIGHT_VELOCITY_ALIGNMENT = 0.1
+WEIGHT_TIME_PENALTY = 0.001
+WEIGHT_ROTATION_SPEED_PENALTY = 0.12
+WEIGHT_HIGH_SPEED_NEAR_SURFACE_PENALTY = 0.05
+
+WEIGHT_FUEL_CONSUMPTION_PENALTY_PER_UNIT = 0.06
+
+WEIGHT_APPROACHING_MARKER_BONUS_PER_PIXEL = 0.5
+WEIGHT_PRECISION_LANDING_BONUS_MAX = 5000.0
+MAX_DIST_FOR_PRECISION_BONUS_PX = 10.0
+MIN_DIST_FOR_MAX_PRECISION_BONUS_PX = 2.0
+
+WEIGHT_SUCCESSFUL_SURFACE_LANDING_BONUS = 20000.0
+
+WEIGHT_NN_TRAJECTORY_COMPLETED = 1000.0
+WEIGHT_DEVIATION_FROM_NN_PATH = -0.05
+MAX_ALLOWED_DEVIATION_NN_PATH = 10.0
+
+WEIGHT_FINAL_LANDING_SPEED_REDUCTION = 150.0
+WEIGHT_FINAL_LANDING_ANGLE_ALIGNMENT = 200.0
+WEIGHT_EXCESSIVE_FINAL_DESCENT_SPEED_PENALTY = 5.0
+
+WEIGHT_REWARD_DERIVATIVE = 0.5
+
+# --- COSTANTI TRAIETTORIA NN ---
+WAYPOINT_COORD_SCALE_XY = SCREEN_WIDTH
+WAYPOINT_VEL_SCALE = 15.0
+
+WEIGHT_TRAJECTORY_SIMILARITY = 2.0
+MAX_EXPECTED_DEVIATION = 50.0
+WEIGHT_EXCESSIVE_DEVIATION = 0.5
+MAX_ALLOWED_DEVIATION = 30.0
+REF_TRAJ_END_REACH_THRESHOLD_PX = 60.0
+
+# --- ALTRE COSTANTI UTILI ---
 LANDING_SPEED_LIMIT = 1.5
 LANDING_ANGLE_LIMIT = np.radians(8)
 TARGET_ANGLE_LANDING = 0.0
 
-MAX_STEPS_PER_EPISODE = 4000
-
-DESCENT_PHASE_ALTITUDE = 200  # Altitudine per fase di discesa
-APPROACH_PHASE_ALTITUDE = 110  # Altitudine per fase di avvicinamento
 NEAR_SURFACE_ALTITUDE_THRESHOLD = 80
-LANDING_PHASE_ALTITUDE = NEAR_SURFACE_ALTITUDE_THRESHOLD  # Riutilizza o modifica
 
+# --- COSTANTI HUD / DISEGNO ---
 LANDING_AID_LINE_LENGTH = 40
 LANDING_AID_ARC_RADIUS = 50
 FUEL_BAR_WIDTH = 100
 FUEL_BAR_HEIGHT = 12
+
+ASSET_FOLDER = "assets"
+PIXELS_PER_KM = 1.0
+assets_folder_exists = os.path.isdir(ASSET_FOLDER)
+if not assets_folder_exists:
+    FUEL_BAR_WIDTH = 100
+    FUEL_BAR_HEIGHT = 12
 
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
@@ -127,13 +134,11 @@ LIGHT_GREEN = (144, 238, 144)
 DARK_RED = (139, 0, 0)
 
 
-WEIGHT_ROTATION_SPEED_PENALTY = 0.12          # Leggermente ridotto per permettere manovre
 WEIGHT_HIGH_SPEED_NEAR_SURFACE_PENALTY = 0.05   # AUMENTATO DRASTICAMENTE (da 0.005)
 WEIGHT_CRASH_PENALTY = 150.0                    # MANTENUTO (forte deterrente)
 WEIGHT_OOB_PENALTY = 100                      # Aumentato leggermente
 WEIGHT_TIMEOUT_PENALTY = 100               # Aumentato leggermente
 
-WEIGHT_ROTATING_TOWARDS_RETROGRADE_BONUS = 100 # Da sintonizzare! (Potrebbe servire un valore diverso da 0.1)
 # Tolleranza angolare: se l'errore è minore di questo, consideriamo allineati
 ALIGNMENT_ERROR_THRESHOLD_RAD = np.radians(5.0) # Esempio: 5 gradi
 MIN_ALTITUDE_FOR_RETROGRADE_BONUS = 0
@@ -309,6 +314,91 @@ class PIDController:
 COS_15_DEGREES = np.cos(np.radians(5))  # Valore soglia per il coseno (circa 0.9659)
 WEIGHT_PRECISE_ALIGNMENT_BONUS = 0.1   # Esempio: Bonus per allineamento stretto
 WEIGHT_OPPOSITE_DIRECTION_PENALTY_FACTOR = 0.1 # Esempio: Fattore per la pe
+
+
+
+# --- COSTANTI MANCANTI PER step() ---
+MAX_RADIAL_SPEED_FINAL_LANDING = 1.2  # Limite massimo di velocità radiale per atterraggio (modifica se necessario)
+MIN_EPISODE_SCORE_FOR_TRUNCATION = -10000  # Soglia di score minimo per troncamento episodio (modifica se necessario)
+
+def check_landing_conditions(current_altitude, contact_threshold):
+    """
+    Restituisce (contact_detected, landing_conditions_met)
+    """
+    contact_detected = current_altitude <= contact_threshold
+    # Puoi aggiungere altre condizioni qui se necessario
+    landing_conditions_met = contact_detected  # Semplificato: atterraggio riuscito se c'è contatto
+    return contact_detected, landing_conditions_met
+
+def check_trajectory_completion(ref_path_positions_np, training_stage):
+    """
+    Restituisce (completed, progress)
+    """
+    # Semplificato: considera completata se la traiettoria ha almeno 2 punti
+    completed = len(ref_path_positions_np) >= 2
+    progress = 1.0 if completed else 0.0
+    return completed, progress
+
+def calculate_trajectory_rewards(ref_path_positions_np):
+    """
+    Restituisce (reward_components_dict, dist_to_ref, extra)
+    """
+    # Semplificato: assegna reward 0 e distanza 0
+    reward_components = {
+        'reward_comp_spatial_proximity': 0.0,
+        'reward_comp_velocity_alignment_angle': 0.0,
+        'reward_comp_nn_traj_completed_spatial': 0.0,
+        'trajectory_reward_comp': 0.0,
+        'reward_comp_vert_orient_brake': 0.0,
+        'reward_comp_vert_orient_accel_penalty': 0.0,
+        'reward_comp_precise_align_bonus': 0.0,
+        'reward_comp_opposite_dir_penalty': 0.0,
+        'reward_comp_velocity_vector_error': 0.0,
+        'reward_comp_progress_along_path': 0.0
+    }
+    dist_to_ref = 0.0
+    extra = {}
+    return reward_components, dist_to_ref, extra
+def calculate_reward_components(ref_path_positions_np, ship_pos, ship_vel, ship_angle):
+    """
+    Calcola i componenti del reward in base alla traiettoria di riferimento e allo stato del lander.
+    Restituisce un dizionario con i componenti del reward e la distanza alla traiettoria.
+    """
+    # Semplificato: assegna reward 0 e distanza 0
+    reward_components = {                       
+        'reward_comp_spatial_proximity': 0.0,
+        'reward_comp_velocity_alignment_angle': 0.0,
+        'reward_comp_nn_traj_completed_spatial': 0.0,
+        'trajectory_reward_comp': 0.0,
+        'reward_comp_vert_orient_brake': 0.0,
+        'reward_comp_vert_orient_accel_penalty': 0.0,
+        'reward_comp_precise_align_bonus': 0.0,
+        'reward_comp_opposite_dir_penalty': 0.0,
+        'reward_comp_velocity_vector_error': 0.0,
+        'reward_comp_progress_along_path': 0.0
+    }
+    dist_to_ref = 0.0
+    extra = {}
+    return reward_components, dist_to_ref, extra
+def calculate_reward(ref_path_positions_np, ship_pos, ship_vel, ship_angle):
+    """
+    Calcola il reward totale in base alla traiettoria di riferimento e allo stato del lander.
+    Restituisce il reward totale e un dizionario con i componenti del reward.
+    """
+    # Semplificato: assegna reward 0 e distanza 0
+    reward_components = {                     
+        'reward_comp_spatial_proximity': 0.0,
+        'reward_comp_velocity_alignment_angle': 0.0,
+        'reward_comp_nn_traj_completed_spatial': 0.0,
+        'trajectory_reward_comp': 0.0,
+        'reward_comp_vert_orient_brake': 0.0,
+        'reward_comp_vert_orient_accel_penalty': 0.0,
+        'reward_comp_precise_align_bonus': 0.0,
+        'reward_comp_opposite_dir_penalty': 0.0,
+        'reward_comp_velocity_vector_error': 0.0,
+        'reward_comp_progress_along_path': 0.0
+    }   
+
 
 class LunarLanderEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 120}
@@ -955,10 +1045,10 @@ class LunarLanderEnv(gym.Env):
 
             if stage1_trajectory_points:
                 self.activate_nn_trajectory_guidance(stage1_trajectory_points)
-                print(f"   Stage 1: Fixed CURVED trajectory activated ({len(stage1_trajectory_points)} points).")
+                #print(f"   Stage 1: Fixed CURVED trajectory activated ({len(stage1_trajectory_points)} points).")
             else:
                 self.is_nn_trajectory_guidance_active = False
-                print("   Stage 1: FAILED to create fixed curved trajectory (NN model/scaler issue?).")
+                #print("   Stage 1: FAILED to create fixed curved trajectory (NN model/scaler issue?).")
 
         elif self.training_stage == 2 or self.training_stage == 3:
             #print(f"INFO (reset): Stage {self.training_stage} - Complex/NN Trajectory")
@@ -1047,7 +1137,7 @@ class LunarLanderEnv(gym.Env):
 
         current_target_waypoint = self._get_current_trajectory_target()
         if not current_target_waypoint:
-            print("WARN: Nessun waypoint valido dalla traiettoria.")
+            #print("WARN: Nessun waypoint valido dalla traiettoria.")
             return [0, 0]
 
         target_pos = np.array(current_target_waypoint['pos'], dtype=np.float32)
@@ -1321,446 +1411,360 @@ class LunarLanderEnv(gym.Env):
 
         return resampled_path
     
+    
     def step(self, action):
-
-        # --- 0. Gestione Stato Iniziale e Azione ---
-        if self.ship_pos is None: # ... (come prima)
-            obs_error = self._get_obs() 
+        """
+        Funzione step() migliorata per curriculum learning che mantiene la fisica originale:
+        - Stage 1: Segui una traiettoria fissa da punto fisso
+        - Stage 2: Segui una traiettoria qualsiasi
+        - Stage 3: Atterra in sicurezza
+        """
+        # --- 0. Gestione stato iniziale e azione ---
+        if self.ship_pos is None:
+            obs_error = self._get_obs()
             reward_error = -WEIGHT_CRASH_PENALTY * 2
-            self.current_episode_score += reward_error
-            return obs_error, reward_error, True, False, {"error": "Called step before reset", "reward_step": reward_error, "training_stage": self.training_stage}
+            info_error = {"error": "Called step before reset", "training_stage": self.training_stage}
+            return obs_error, reward_error, True, False, info_error
 
-        actual_action = action 
-
-        if self.is_nn_trajectory_guidance_active: # Questo flag è usato per qualsiasi traiettoria
-            self.nn_guidance_time_elapsed += TIME_STEP
-        # Altrimenti, se hai un altro tipo di traiettoria per PID che usa un tempo diverso:
-        # elif self.trajectory_autopilot_on: # o un flag simile per PID
-        #     self.trajectory_time_elapsed += TIME_STEP
-
-        # --- 1. FISICA DELL'AMBIENTE ---
-        # (COPIA QUI IL TUO BLOCCO FISICA ESISTENTE - quello che aggiorna self.ship_pos, ecc.
-        #  e calcola fuel_consumed_this_step)
-        # Esempio di struttura del blocco fisica da inserire qui:
+        # --- 1. FISICA DELL'AMBIENTE (ripristinato dall'originale) ---
         fuel_consumed_this_step = 0.0
-        prev_info_data_for_phys = self._get_info() # Info prima della fisica per damping, ecc.
 
+        # Applicazione del vento
         if self.enable_wind and not self.fuel_empty:
             base_wind_x = self.wind_power * (self.np_random.choice([-1,1]) if self.turbulence_power > 0 else 1)
             gust_x = (self.np_random.uniform() - 0.5) * 2 * self.turbulence_power
             gust_y = (self.np_random.uniform() - 0.5) * 2 * self.turbulence_power
-            actual_wind_force_x = base_wind_x + gust_x
+            actual_wind_force_x = base_wind_x + gust_x        
             actual_wind_force_x += self.wind_power * np.sign(CENTER_X - self.ship_pos[0]) * 0.5
             actual_wind_force_y = gust_y
             if self.current_mass > 0:
-                wind_accel_x = (actual_wind_force_x / self.current_mass); wind_accel_y = (actual_wind_force_y / self.current_mass)
-                self.ship_vel[0] += wind_accel_x * TIME_STEP; self.ship_vel[1] += wind_accel_y * TIME_STEP
+                wind_accel_x = (actual_wind_force_x / self.current_mass)
+                wind_accel_y = (actual_wind_force_y / self.current_mass)
+                self.ship_vel[0] += wind_accel_x * TIME_STEP
+                self.ship_vel[1] += wind_accel_y * TIME_STEP
         
+        # Applicazione della gravità
         direction_to_center = np.array([CENTER_X, CENTER_Y]) - self.ship_pos
-        distance_sq = max(np.dot(direction_to_center, direction_to_center), 1.0); dist_to_center = np.sqrt(distance_sq)
+        distance_sq = max(np.dot(direction_to_center, direction_to_center), 1.0)
+        dist_to_center = np.sqrt(distance_sq)
         gravity_force_magnitude = GRAVITY_CONST / distance_sq
-        altitude_for_gravity_assist = prev_info_data_for_phys["altitude_surface"] # Usa info PRE-fisica
-        if altitude_for_gravity_assist < 50: # Landing assist factor
+        
+        # Ottieni info sullo stato attuale per la fisica
+        current_info_data = self._get_info()
+        altitude_for_gravity_assist = current_info_data["altitude_surface"]
+        
+        # Assistenza gravitazionale se vicini alla superficie
+        if altitude_for_gravity_assist < 50:
             gravity_force_magnitude *= max(0.7, 1.0 - (50 - altitude_for_gravity_assist) / 50 * 0.3)
+        
         gravity_accel_vector = np.zeros(2)
-        if dist_to_center > 1e-9: gravity_accel_vector = (direction_to_center / dist_to_center) * gravity_force_magnitude
+        if dist_to_center > 1e-9:
+            gravity_accel_vector = (direction_to_center / dist_to_center) * gravity_force_magnitude
         self.ship_vel += gravity_accel_vector * TIME_STEP
         
-        thrust_force_on_ship = np.zeros(2, dtype=np.float32); torque_on_ship_val = 0.0
-        effective_thrust_cmd = actual_action[0]; effective_rotation_cmd = actual_action[1]
-        if self.fuel_empty: effective_thrust_cmd = 0; effective_rotation_cmd = 0
+        # Gestione spinta e rotazione
+        thrust_force_on_ship = np.zeros(2, dtype=np.float32)
+        torque_on_ship_val = 0.0
         
-        current_local_vertical_angle_phys, _ = self._get_local_vertical_angle_and_altitude() 
-        absolute_ship_orientation_world_phys = normalize_angle(current_local_vertical_angle_phys + self.ship_angle)
+        effective_thrust_cmd = action[0]
+        effective_rotation_cmd = action[1]
+        
+        if self.fuel_empty:
+            effective_thrust_cmd = 0
+            effective_rotation_cmd = 0
+        
+        current_local_vertical_angle, _ = self._get_local_vertical_angle_and_altitude()
+        absolute_ship_orientation_world = normalize_angle(current_local_vertical_angle + self.ship_angle)
         
         if effective_thrust_cmd == 1:
-            thrust_dir_world = np.array([np.cos(absolute_ship_orientation_world_phys), np.sin(absolute_ship_orientation_world_phys)])
+            thrust_dir_world = np.array([np.cos(absolute_ship_orientation_world), np.sin(absolute_ship_orientation_world)])
             thrust_force_on_ship = thrust_dir_world * MAIN_THRUST_FORCE
             fuel_consumed_this_step += FUEL_CONSUMPTION_MAIN * TIME_STEP
-        if effective_rotation_cmd == 1: torque_on_ship_val = ROTATION_THRUST_TORQUE; fuel_consumed_this_step += FUEL_CONSUMPTION_ROTATION * TIME_STEP
-        elif effective_rotation_cmd == 2: torque_on_ship_val = -ROTATION_THRUST_TORQUE; fuel_consumed_this_step += FUEL_CONSUMPTION_ROTATION * TIME_STEP
+        
+        if effective_rotation_cmd == 1:
+            torque_on_ship_val = ROTATION_THRUST_TORQUE
+            fuel_consumed_this_step += FUEL_CONSUMPTION_ROTATION * TIME_STEP
+        elif effective_rotation_cmd == 2:
+            torque_on_ship_val = -ROTATION_THRUST_TORQUE
+            fuel_consumed_this_step += FUEL_CONSUMPTION_ROTATION * TIME_STEP
         
         self.current_fuel -= fuel_consumed_this_step
-        if self.current_fuel <= 0: self.current_fuel = 0; self.fuel_empty = True
+        if self.current_fuel <= 0:
+            self.current_fuel = 0
+            self.fuel_empty = True
+        
         self.current_mass = DRY_MASS + self.current_fuel
         
         if self.current_mass > 0:
             linear_accel_from_thrust = thrust_force_on_ship / self.current_mass
-            inertia_approx = self.current_mass * ((self.actual_ship_w**2 + self.actual_ship_h**2) / 1200.0); inertia_approx = max(inertia_approx, 1e-6)
+            inertia_approx = self.current_mass * ((self.actual_ship_w**2 + self.actual_ship_h**2) / 1200.0)
+            inertia_approx = max(inertia_approx, 1e-6)
             angular_accel_from_torque = torque_on_ship_val / inertia_approx
-            self.ship_vel += linear_accel_from_thrust * TIME_STEP; self.ship_angular_vel += angular_accel_from_torque * TIME_STEP
+            self.ship_vel += linear_accel_from_thrust * TIME_STEP
+            self.ship_angular_vel += angular_accel_from_torque * TIME_STEP
         
-        is_thrust_intended_phys = actual_action[0] == 1; is_thrust_active_for_damping_phys = is_thrust_intended_phys and not self.fuel_empty
-        is_near_surface_damping_phys = prev_info_data_for_phys["altitude_surface"] < NEAR_SURFACE_ALTITUDE_THRESHOLD
-        base_damping_factor_phys = 0.98 if is_thrust_active_for_damping_phys else 0.90
-        surface_damping_factor_phys = 0.95 if is_near_surface_damping_phys else base_damping_factor_phys
-        self.ship_angular_vel *= surface_damping_factor_phys
+        # Smorzamento naturale dell'angolo
+        is_thrust_active = action[0] == 1 and not self.fuel_empty
+        is_near_surface = altitude_for_gravity_assist < NEAR_SURFACE_ALTITUDE_THRESHOLD
         
-        if actual_action[1] == 0: # No rotation command
-            if abs(self.ship_angular_vel) > 0.01: self.ship_angular_vel *= (0.92 - min(0.1, abs(self.ship_angular_vel) * 0.05))
-            if not is_thrust_active_for_damping_phys and abs(self.ship_angular_vel) < 0.1:
-                angle_error_stabilization_phys = normalize_angle(0.0 - self.ship_angle) # Stabilize to upright relative
-                if abs(angle_error_stabilization_phys) > 0.05: self.ship_angular_vel += min(0.0005, abs(angle_error_stabilization_phys) * 0.002) * np.sign(angle_error_stabilization_phys)
-        # Second damping part from your code (REPLACEMENT 2)
-        if actual_action[1] == 0 and abs(self.ship_angular_vel) > 0.01:
-            if not is_thrust_active_for_damping_phys:
-                angle_error_stabilization2_phys = normalize_angle(0.0 - self.ship_angle)
-                if (angle_error_stabilization2_phys * self.ship_angular_vel > 0) or abs(angle_error_stabilization2_phys) < 0.1: self.ship_angular_vel *= 0.85
-
-        self.ship_angle += self.ship_angular_vel * TIME_STEP; self.ship_angle = normalize_angle(self.ship_angle)
-        self.ship_pos += self.ship_vel * TIME_STEP; 
+        angular_damping = 0.98 if is_thrust_active else 0.90
+        if is_near_surface:
+            angular_damping = 0.95
+        
+        self.ship_angular_vel *= angular_damping
+        
+        if action[1] == 0:  # Nessun comando di rotazione
+            if abs(self.ship_angular_vel) > 0.01:
+                self.ship_angular_vel *= (0.92 - min(0.1, abs(self.ship_angular_vel) * 0.05))
+                
+            # Auto-stabilizzazione passiva
+            if not is_thrust_active and abs(self.ship_angular_vel) < 0.1:
+                angle_error = normalize_angle(0.0 - self.ship_angle)
+                if abs(angle_error) > 0.05:
+                    self.ship_angular_vel += min(0.0005, abs(angle_error) * 0.002) * np.sign(angle_error)
+        
+        # Aggiornamento posizione e angolo
+        self.ship_angle += self.ship_angular_vel * TIME_STEP
+        self.ship_angle = normalize_angle(self.ship_angle)
+        self.ship_pos += self.ship_vel * TIME_STEP
         self.steps_taken += 1
-        # --- FINE BLOCCO FISICA ---
+        
+        # Registra la traiettoria se necessario
+        if hasattr(self, 'current_trajectory'):
+            self.current_trajectory.append((self.ship_pos.copy(), self.ship_vel.copy(), self.ship_angle, action.copy()))
 
-        if hasattr(self, 'current_trajectory'): 
-            self.current_trajectory.append(
-                (self.ship_pos.copy(), self.ship_vel.copy(), self.ship_angle, actual_action.copy())
-            )
-
-        # --- 2. OTTIENI INFORMAZIONI SULLO STATO CORRENTE (POST-FISICA) ---
-        current_info_data = self._get_info() 
-        current_info_data['training_stage'] = self.training_stage # Logga lo stage
-        current_altitude = current_info_data["altitude_surface"]
-        current_speed_radial = current_info_data["speed_radial"]
-        current_speed_tangential = current_info_data["speed_tangential"] 
-        current_total_speed = current_info_data["speed_total"]
-        current_ship_angle_relative_rad = np.radians(current_info_data["ship_angle_relative_deg"])
-
-        # --- 3. CALCOLO DELLA RICOMPENSA PRIMARIA (STAGE-DEPENDENT) ---
-        primary_reward_this_step = 0.0
+        # --- 2. CALCOLA REWARD E CONDIZIONI DI TERMINAZIONE (Con la logica curriculum migliorata) ---
+        reward = 0.0
         terminated = False
         truncated = False
-        landed_successfully = False # Flag per esito
-        crashed = False             # Flag per esito
         
-        # Inizializza componenti di reward in current_info_data
-        # (Questo ripete un po' reset, ma è bene averli per ogni step in info)
-        current_info_data.update({k: 0.0 for k in [
-            'reward_comp_approaching_marker', 'reward_comp_precision_landing', 
-            'reward_comp_spatial_proximity', 'reward_comp_velocity_alignment',
-            'reward_comp_nn_traj_completed_spatial', 'trajectory_reward_comp',
-            'reward_comp_vert_orient_brake', 'reward_comp_vert_orient_accel_penalty',
-            'reward_comp_precise_align_bonus', 'reward_comp_opposite_dir_penalty'
-        ]})
-        current_info_data['final_dist_to_marker_on_land'] = -1.0
+        # Ottieni stato attuale per il reward (dopo l'aggiornamento fisico)
+        local_vertical_angle, altitude = self._get_local_vertical_angle_and_altitude()
+        speed = np.linalg.norm(self.ship_vel)
+        angle_error = abs(normalize_angle(self.ship_angle - TARGET_ANGLE_LANDING))
+        radial_speed, tangential_speed = self._get_polar_velocities()
+        
+        out_of_bounds = not (-50 < self.ship_pos[0] < SCREEN_WIDTH + 50 and 
+                             -50 < self.ship_pos[1] < SCREEN_HEIGHT + 50)
+        contact_threshold = (self.actual_ship_h / 2.0) * 0.9
+        touched_surface = altitude <= contact_threshold
 
-
-        # Penalità di base (comuni a tutti gli stage)
-        primary_reward_this_step -= WEIGHT_TIME_PENALTY
-        primary_reward_this_step -= WEIGHT_FUEL_CONSUMPTION_PENALTY_PER_UNIT * fuel_consumed_this_step
-        primary_reward_this_step -= WEIGHT_ROTATION_SPEED_PENALTY * abs(self.ship_angular_vel)
-
-        # --- Logica di Reward Specifica per Stage ---
-
-        # === STAGE 1 & 2: SEGUIRE TRAIETTORIA ===
-        if self.training_stage == 1 or self.training_stage == 2:
-            if self.is_nn_trajectory_guidance_active and self.nn_trajectory_points and \
-               len(self.nn_trajectory_points) >= 2 and not self.nn_trajectory_completed_flag_for_bonus:
+        info = {
+            'altitude': altitude,
+            'speed': speed,
+            'speed_radial': radial_speed, 
+            'speed_tangential': tangential_speed,
+            'angle_error': angle_error,
+            'fuel': self.current_fuel,
+            'steps': self.steps_taken,
+            'training_stage': self.training_stage,
+            'fuel_consumed_step': fuel_consumed_this_step
+        }
+        
+        # --- CALCOLO REWARD BASE ---
+        # Salva i componenti individuali per analisi e debug
+        reward_components = {}
+        
+        # Piccola penalità per il tempo (per incoraggiare a completare velocemente)
+        reward_components['time_penalty'] = -0.05
+        
+        # Penalità per l'uso del carburante
+        reward_components['fuel_penalty'] = -0.01 * fuel_consumed_this_step
+        
+        # --- STAGE 1 & 2: Segui la traiettoria ---
+        if self.training_stage in [1, 2]:
+            if self.nn_trajectory_points and len(self.nn_trajectory_points) > 1:
+                # Trova il punto più vicino sulla traiettoria
+                ref_path = [np.array(wp['pos']) for wp in self.nn_trajectory_points]
+                closest_point, dist_to_path, segment_idx, _ = self._find_closest_point_on_polyline(
+                    self.ship_pos, ref_path
+                )
                 
-                current_info_data['nn_guidance_active_shape'] = True # Log
-                ref_path_positions_np = [np.array(wp['pos']) for wp in self.nn_trajectory_points]
-                closest_pt_on_ref, dist_to_ref, seg_idx_ref, tangent_at_closest = \
-                    self._find_closest_point_on_polyline(self.ship_pos, ref_path_positions_np)
-                current_info_data['nn_dist_to_ref_shape'] = dist_to_ref
-
-                if closest_pt_on_ref is not None:
-                    # A. Prossimità Spaziale (esistente)
-                    proximity_bonus = WEIGHT_SPATIAL_PROXIMITY_TO_REF_PATH * np.exp(-PROXIMITY_DECAY_FACTOR * dist_to_ref)
-                    primary_reward_this_step += proximity_bonus
-                    current_info_data['reward_comp_spatial_proximity'] = proximity_bonus
-                    if dist_to_ref > NN_PATH_CORRIDOR_RADIUS:
-                        primary_reward_this_step += WEIGHT_DEVIATE_NN_PATH_PENALTY * (dist_to_ref - NN_PATH_CORRIDOR_RADIUS)
-
-                    # B. Allineamento ANGOLO Velocità (esistente - puoi decidere se tenerlo o ridurne il peso)
-                    if tangent_at_closest is not None and WEIGHT_VELOCITY_ALIGNMENT_WITH_REF_PATH > 0:
-                        norm_ship_vel = np.linalg.norm(self.ship_vel)
-                        if norm_ship_vel > 0.1: # Leggera soglia per stabilità
-                            unit_ship_vel_dir = self.ship_vel / norm_ship_vel
-                            cos_angle_vel_path = np.dot(unit_ship_vel_dir, tangent_at_closest)
-                            
-                            alignment_reward_component_angle = 0.0
-                            if cos_angle_vel_path >= COS_15_DEGREES: # Angolo entro +/- 15 gradi
-                                alignment_reward_component_angle = WEIGHT_VELOCITY_ALIGNMENT_WITH_REF_PATH * cos_angle_vel_path
-                            else: # Angolo > 15 gradi
-                                deviation_from_perfect_alignment = 1.0 - cos_angle_vel_path
-                                alignment_reward_component_angle = -WEIGHT_VELOCITY_ALIGNMENT_WITH_REF_PATH * deviation_from_perfect_alignment # O usa un peso diverso per il malus
-                            
-                            primary_reward_this_step += alignment_reward_component_angle
-                            current_info_data['reward_comp_velocity_alignment_angle'] = alignment_reward_component_angle # Rinominata per chiarezza
-
-                    # *** NUOVA PENALITA' SULL'ERRORE DEL VETTORE VELOCITA' ***
-                    if seg_idx_ref != -1 and seg_idx_ref < len(self.nn_trajectory_points):
-                        # Approssima la velocità target usando il waypoint iniziale del segmento più vicino
-                        # Per maggiore precisione, potresti interpolare la velocità lungo il segmento
-                        # se closest_pt_on_ref non è un vertice.
-                        target_vel_at_ref_point_px_s = np.array(self.nn_trajectory_points[seg_idx_ref]['vel'])
-                        
-                        velocity_error_vector = self.ship_vel - target_vel_at_ref_point_px_s
-                        # Errore quadratico sulla magnitudo del vettore differenza velocità
-                        velocity_error_sq_magnitude = np.dot(velocity_error_vector, velocity_error_vector) # norm**2
-
-                        penalty_velocity_vector = -WEIGHT_VELOCITY_VECTOR_ERROR_PENALTY * velocity_error_sq_magnitude
-                        primary_reward_this_step += penalty_velocity_vector
-                        current_info_data['reward_comp_velocity_vector_error'] = penalty_velocity_vector
-                    # *** FINE NUOVA PENALITA' ***
-
-                    # C. Progresso Spaziale (esistente)
-                    if seg_idx_ref != -1 and hasattr(self, 'last_closest_ref_segment_idx'):
-                        if seg_idx_ref > self.last_closest_ref_segment_idx :
-                            # Calcola e aggiungi il bonus per il progresso
-                            progress_reward = WEIGHT_PROGRESS_ALONG_PATH_SHAPE * (seg_idx_ref - self.last_closest_ref_segment_idx)
-                            primary_reward_this_step += progress_reward
-                            current_info_data['reward_comp_progress_along_path'] = progress_reward # Logga anche questo
-                        self.last_closest_ref_segment_idx = seg_idx_ref
+                # Calcola progresso lungo la traiettoria (0.0-1.0)
+                progress = min(1.0, float(segment_idx) / max(1, len(ref_path) - 1))
+                info['progress_on_path'] = progress
                 
-                # E. Completamento Traiettoria per Stage 1 & 2
-                if ref_path_positions_np:
-                    dist_to_end_of_ref_shape = np.linalg.norm(self.ship_pos - ref_path_positions_np[-1])
-                    # Per Stage 1 e 2, usa una soglia di completamento più generosa o basata sul tempo/indice
-                    # REF_TRAJ_END_REACH_THRESHOLD_PX potrebbe essere troppo grande/piccolo a seconda della traiettoria
-                    end_reach_threshold = REF_TRAJ_END_REACH_THRESHOLD_PX / 2 if self.training_stage == 1 else REF_TRAJ_END_REACH_THRESHOLD_PX
-                    if dist_to_end_of_ref_shape < end_reach_threshold and not self.nn_trajectory_completed_flag_for_bonus:
-                        primary_reward_this_step += WEIGHT_NN_TRAJECTORY_COMPLETED # Bonus per completamento
-                        current_info_data['reward_comp_nn_traj_completed_spatial'] = WEIGHT_NN_TRAJECTORY_COMPLETED
-                        self.nn_trajectory_completed_flag_for_bonus = True
-                        truncated = True # Fine episodio con successo per Stage 1 & 2
-                        current_info_data['outcome_message'] = f"STAGE {self.training_stage} TRAJECTORY COMPLETED"
-                        print(f"INFO (step): Stage {self.training_stage} Trajectory Completed.")
-            
-            # Penalità per atterraggio/contatto non desiderato in Stage 1 & 2
-            contact_threshold_s12 = (self.actual_ship_h / 2.0) * 0.95
-            if current_altitude <= contact_threshold_s12 and not (terminated or truncated):
-                primary_reward_this_step -= WEIGHT_CRASH_PENALTY * 1.5 # Penalità forte per contatto
-                terminated = True # Contatto indesiderato è un fallimento
-                crashed = True
-                current_info_data['outcome_message'] = f"STAGE {self.training_stage} UNWANTED CONTACT"
-
-        # === STAGE 3: SEGUIRE TRAIETTORIA E ATTERRARE ===
-        # === STAGE 3: SEGUIRE TRAIETTORIA E ATTERRARE ===
-        elif self.training_stage == 3:
-            if not self.trajectory_completed_for_landing: # Fase di tracciamento traiettoria
-                if self.is_nn_trajectory_guidance_active and self.nn_trajectory_points and \
-                   len(self.nn_trajectory_points) >= 2 and not self.nn_trajectory_completed_flag_for_bonus:
+                # 1. Penalità per la distanza dalla traiettoria (quadratica per essere più forte quando lontani)
+                proximity_penalty = -0.01 * min(dist_to_path, 100.0) 
+                reward_components['path_proximity'] = proximity_penalty
+                
+                # NUOVO: Calcola differenza di velocità con la traiettoria target
+                target_velocity = None
+                if segment_idx < len(self.nn_trajectory_points) - 1:
+                    # Usa la velocità del punto corrente sulla traiettoria
+                    target_velocity = np.array(self.nn_trajectory_points[segment_idx]['vel'])
+                elif len(self.nn_trajectory_points) > 0:
+                    # Se siamo oltre l'ultimo segmento, usa la velocità dell'ultimo waypoint
+                    target_velocity = np.array(self.nn_trajectory_points[-1]['vel'])
+                
+                if target_velocity is not None:
+                    # Calcola la differenza di velocità
+                    velocity_diff = np.linalg.norm(target_velocity - self.ship_vel)
                     
-                    current_info_data['nn_guidance_active_shape'] = True
-                    ref_path_positions_np_s3 = [np.array(wp['pos']) for wp in self.nn_trajectory_points]
-                    closest_pt_on_ref_s3, dist_to_ref_s3, seg_idx_ref_s3, tangent_at_closest_s3 = \
-                        self._find_closest_point_on_polyline(self.ship_pos, ref_path_positions_np_s3)
-                    current_info_data['nn_dist_to_ref_shape'] = dist_to_ref_s3
-
-                    if closest_pt_on_ref_s3 is not None:
-                        # A. Prossimità Spaziale (come sopra)
-                        proximity_bonus_s3 = WEIGHT_SPATIAL_PROXIMITY_TO_REF_PATH * np.exp(-PROXIMITY_DECAY_FACTOR * dist_to_ref_s3)
-                        primary_reward_this_step += proximity_bonus_s3
-                        current_info_data['reward_comp_spatial_proximity'] = proximity_bonus_s3 # Sovrascrive se già presente, ok
-                        if dist_to_ref_s3 > NN_PATH_CORRIDOR_RADIUS:
-                            primary_reward_this_step += WEIGHT_DEVIATE_NN_PATH_PENALTY * (dist_to_ref_s3 - NN_PATH_CORRIDOR_RADIUS)
-                        
-                        # B. Allineamento ANGOLO Velocità (come sopra)
-                        if tangent_at_closest_s3 is not None and WEIGHT_VELOCITY_ALIGNMENT_WITH_REF_PATH > 0:
-                            norm_ship_vel_s3 = np.linalg.norm(self.ship_vel)
-                            if norm_ship_vel_s3 > 0.1:
-                                unit_ship_vel_dir_s3 = self.ship_vel / norm_ship_vel_s3
-                                cos_angle_vel_path_s3 = np.dot(unit_ship_vel_dir_s3, tangent_at_closest_s3)
-                                alignment_reward_component_angle_s3 = 0.0
-                                if cos_angle_vel_path_s3 >= COS_15_DEGREES:
-                                    alignment_reward_component_angle_s3 = WEIGHT_VELOCITY_ALIGNMENT_WITH_REF_PATH * cos_angle_vel_path_s3
-                                else:
-                                    deviation_from_perfect_s3 = 1.0 - cos_angle_vel_path_s3
-                                    alignment_reward_component_angle_s3 = -WEIGHT_VELOCITY_ALIGNMENT_WITH_REF_PATH * deviation_from_perfect_s3
-                                primary_reward_this_step += alignment_reward_component_angle_s3
-                                current_info_data['reward_comp_velocity_alignment_angle'] = alignment_reward_component_angle_s3
-                        
-                        # *** NUOVA PENALITA' SULL'ERRORE DEL VETTORE VELOCITA' (anche per Stage 3) ***
-                        if seg_idx_ref_s3 != -1 and seg_idx_ref_s3 < len(self.nn_trajectory_points):
-                            target_vel_at_ref_point_px_s_s3 = np.array(self.nn_trajectory_points[seg_idx_ref_s3]['vel'])
-                            velocity_error_vector_s3 = self.ship_vel - target_vel_at_ref_point_px_s_s3
-                            velocity_error_sq_magnitude_s3 = np.dot(velocity_error_vector_s3, velocity_error_vector_s3)
-
-                            penalty_velocity_vector_s3 = -WEIGHT_VELOCITY_VECTOR_ERROR_PENALTY * velocity_error_sq_magnitude_s3
-                            primary_reward_this_step += penalty_velocity_vector_s3
-                            current_info_data['reward_comp_velocity_vector_error'] = penalty_velocity_vector_s3
-                        # *** FINE NUOVA PENALITA' ***
-
-                        # C. Progresso Spaziale (come sopra)
-                        if seg_idx_ref_s3 != -1 and hasattr(self, 'last_closest_ref_segment_idx'): # Assicurati che last_closest_ref_segment_idx sia resettato correttamente
-                            if seg_idx_ref_s3 > self.last_closest_ref_segment_idx :
-                                progress_reward_s3 = WEIGHT_PROGRESS_ALONG_PATH_SHAPE * (seg_idx_ref_s3 - self.last_closest_ref_segment_idx)
-                                primary_reward_this_step += progress_reward_s3
-                                current_info_data['reward_comp_progress_along_path'] = progress_reward_s3
-                            self.last_closest_ref_segment_idx = seg_idx_ref_s3
-
-                    # E. Completamento Traiettoria per Stage 3 -> transizione a landing
-                    if ref_path_positions_np_s3:
-                        dist_to_end_of_ref_shape_s3 = np.linalg.norm(self.ship_pos - ref_path_positions_np_s3[-1])
-                        if dist_to_end_of_ref_shape_s3 < REF_TRAJ_END_REACH_THRESHOLD_PX and not self.nn_trajectory_completed_flag_for_bonus:
-                            primary_reward_this_step += WEIGHT_NN_TRAJECTORY_COMPLETED # Bonus per fine traiettoria
-                            current_info_data['reward_comp_nn_traj_completed_spatial'] = WEIGHT_NN_TRAJECTORY_COMPLETED
-                            self.nn_trajectory_completed_flag_for_bonus = True # Per non darlo più
-                            self.trajectory_completed_for_landing = True # ATTIVA FASE ATTERRAGGIO
-                            self.is_nn_trajectory_guidance_active = False # Disattiva guida su traiettoria
-                            print("INFO (step): Stage 3 Trajectory Portion Completed. Transitioning to Landing.")
-                elif not self.is_nn_trajectory_guidance_active and not self.trajectory_completed_for_landing :
-                    # Se la guida NN non è (più) attiva E non abbiamo ancora completato la traiettoria per atterrare
-                    # (es. se la traiettoria fornita era corta o l'agente l'ha persa)
-                    # potremmo considerare questo un "fallimento" della parte di traiettoria dello Stage 3
-                    # o semplicemente lasciare che l'agente tenti di atterrare da dove si trova.
-                    # Per ora, se perde la traiettoria, passerà implicitamente a tentare l'atterraggio.
-                    self.trajectory_completed_for_landing = True # Forza la transizione a landing
-                    print("INFO (step): Stage 3 - NN Guidance ended/lost, attempting landing from current state.")
-
-
-            if self.trajectory_completed_for_landing and not (terminated or truncated): # Fase di atterraggio
-                # Applica ricompense di shaping per l'atterraggio
-                # ... (la tua logica di shaping per WEIGHT_FINAL_LANDING_SPEED_REDUCTION, ecc.) ...
-                if current_speed_radial < 0: 
-                    if abs(current_speed_radial) < abs(MAX_RADIAL_SPEED_FINAL_LANDING):
-                        primary_reward_this_step += WEIGHT_FINAL_LANDING_SPEED_REDUCTION * (1.0 - (abs(current_speed_radial) / abs(MAX_RADIAL_SPEED_FINAL_LANDING))) * 0.5
-                    else: 
-                        primary_reward_this_step -= WEIGHT_EXCESSIVE_FINAL_DESCENT_SPEED_PENALTY * (abs(current_speed_radial) - abs(MAX_RADIAL_SPEED_FINAL_LANDING))
-                tangential_speed_reduction_bonus_s3 = (LANDING_SPEED_LIMIT * 0.5 - abs(current_speed_tangential)) / (LANDING_SPEED_LIMIT * 0.5 + 1e-9)
-                if tangential_speed_reduction_bonus_s3 > 0:
-                    primary_reward_this_step += WEIGHT_FINAL_LANDING_SPEED_REDUCTION * tangential_speed_reduction_bonus_s3 * 0.3
-                angle_error_final_land_s3 = abs(current_ship_angle_relative_rad - TARGET_ANGLE_LANDING)
-                primary_reward_this_step += WEIGHT_FINAL_LANDING_ANGLE_ALIGNMENT * np.exp(-5.0 * angle_error_final_land_s3)
+                    # Calcola la ricompensa per l'allineamento della velocità
+                    # Bonus positivo per velocità simili, penalità per velocità diverse
+                    velocity_diff_normalized = min(1.0, velocity_diff / 10.0)
+                    velocity_alignment_reward = WEIGHT_VELOCITY_ALIGNMENT * (1.0 - 2 * velocity_diff_normalized)
+                    reward_components['velocity_alignment'] = velocity_alignment_reward
+                    info['velocity_diff'] = velocity_diff
                 
-                # Bonus Avvicinamento Marker (specifico per atterraggio)
-                if self.landing_target_display_pos is not None:
-                    # ... (logica bonus avvicinamento marker, già presente nel tuo codice) ...
-                    current_dist_to_marker_s3 = np.linalg.norm(self.ship_pos - np.array(self.landing_target_display_pos))
-                    if self.previous_dist_to_marker != float('inf'): # Evita il primo step del marker
-                        distance_reduction_s3 = self.previous_dist_to_marker - current_dist_to_marker_s3
-                        if distance_reduction_s3 > 0:
-                            approach_b = WEIGHT_APPROACHING_MARKER_BONUS_PER_PIXEL * distance_reduction_s3
-                            primary_reward_this_step += approach_b
-                            current_info_data['reward_comp_approaching_marker'] = approach_b
-                    self.previous_dist_to_marker = current_dist_to_marker_s3
-
-
-                # Condizione di contatto per Stage 3 (atterraggio o crash)
-                contact_threshold_s3 = (self.actual_ship_h / 2.0) * 0.9
-                if current_altitude <= contact_threshold_s3 and not terminated : # Aggiunto not terminated
-                    terminated = True 
-                    # ... (la tua logica per speed_ok, radial_speed_ok, angle_ok) ...
-                    speed_ok_s3 = current_total_speed < LANDING_SPEED_LIMIT # etc.
-                    radial_speed_ok_s3 = abs(current_speed_radial) < LANDING_SPEED_LIMIT * 0.8 and current_speed_radial < -0.01
-                    tangential_speed_ok_s3 = abs(current_speed_tangential) < LANDING_SPEED_LIMIT * 0.5
-                    angle_ok_s3 = abs(normalize_angle(current_ship_angle_relative_rad - TARGET_ANGLE_LANDING)) < LANDING_ANGLE_LIMIT
-
-                    if speed_ok_s3 and radial_speed_ok_s3 and tangential_speed_ok_s3 and angle_ok_s3:
-                        landed_successfully = True
-                        primary_reward_this_step += WEIGHT_SUCCESSFUL_SURFACE_LANDING_BONUS
-                        current_info_data['outcome_message'] = "STAGE 3 LANDED SUCCESSFULLY"
-                        # ... (bonus precisione atterraggio) ...
-                        if self.landing_target_display_pos is not None:
-                            final_dist_s3 = np.linalg.norm(self.ship_pos - np.array(self.landing_target_display_pos))
-                            current_info_data['final_dist_to_marker_on_land'] = final_dist_s3
-                            # ... (calcola precision_landing_bonus_val_s3) ...
-                            # primary_reward_this_step += precision_landing_bonus_val_s3
-                            # current_info_data['reward_comp_precision_landing'] = precision_landing_bonus_val_s3
-                    else:
-                        crashed = True
-                        primary_reward_this_step -= WEIGHT_CRASH_PENALTY
-                        current_info_data['outcome_message'] = f"STAGE 3 CRASHED (...dettagli...)"
+                # 2. Bonus per il progresso lungo la traiettoria (contrasta la penalità per il tempo)
+                progress_reward = 0.5 * progress
+                reward_components['path_progress'] = progress_reward
+                
+                # 3. Verifica se il lander è vicino alla fine della traiettoria
+                last_point = ref_path[-1]
+                dist_to_end = np.linalg.norm(self.ship_pos - last_point)
+                if dist_to_end < 15.0:
+                    # Grosso bonus per il raggiungimento della fine
+                    completion_bonus = 100.0 * (1.0 - dist_to_end/15.0)
+                    reward_components['path_completion'] = completion_bonus
+                    
+                    # Se è davvero vicino e Stage 1/2, terminare con successo
+                    if dist_to_end < 5.0:
+                        reward_components['trajectory_success'] = 200.0
+                        terminated = True
+                        info['reason'] = 'trajectory_completed'
+                else:
+                    reward_components['path_completion'] = 0.0
+                    reward_components['trajectory_success'] = 0.0
+            else:
+                # Penalità se non c'è traiettoria disponibile
+                reward_components['no_trajectory_penalty'] = -1.0
         
-        # Logica di TRONCAMENTO comune (OOB, Timeout, Fuel, Score)
-        # Applicata se l'episodio non è già terminato per un atterraggio/crash o per completamento traiettoria Stage 1/2
-        if not (terminated or truncated):
-            oob_margin = 50
-            is_oob = not (-oob_margin < self.ship_pos[0] < SCREEN_WIDTH + oob_margin and \
-                            -oob_margin < self.ship_pos[1] < SCREEN_HEIGHT + oob_margin)
-            if is_oob:
-                truncated = True; primary_reward_this_step -= WEIGHT_OOB_PENALTY
-                current_info_data['outcome_message'] = f"TRUNCATED [OOB] (Stage {self.training_stage})"
-                current_info_data['out_of_bounds'] = True
+        # --- STAGE 3: Atterraggio ---
+        elif self.training_stage == 3:
+            # Penalità per velocità eccessiva (più forte vicino alla superficie)
+            speed_penalty = -0.05 * speed 
+            if altitude < NEAR_SURFACE_ALTITUDE_THRESHOLD:
+                speed_penalty *= (1.0 + (NEAR_SURFACE_ALTITUDE_THRESHOLD - altitude) / NEAR_SURFACE_ALTITUDE_THRESHOLD * 3.0)
+            reward_components['speed_penalty'] = speed_penalty
             
-            elif self.steps_taken >= MAX_STEPS_PER_EPISODE:
-                truncated = True; primary_reward_this_step -= WEIGHT_TIMEOUT_PENALTY
-                current_info_data['outcome_message'] = f"TRUNCATED [TIMEOUT] (Stage {self.training_stage})"
-                current_info_data['timeout'] = True
+            # Penalità per angolo non verticale (più forte vicino alla superficie)
+            angle_penalty = -0.1 * angle_error
+            if altitude < NEAR_SURFACE_ALTITUDE_THRESHOLD:
+                angle_penalty *= (1.0 + (NEAR_SURFACE_ALTITUDE_THRESHOLD - altitude) / NEAR_SURFACE_ALTITUDE_THRESHOLD * 3.0)
+            reward_components['angle_penalty'] = angle_penalty
             
-            elif self.fuel_empty:
-                truncated = True; primary_reward_this_step -= WEIGHT_FUEL_EMPTY_PENALTY
-                if current_altitude > NEAR_SURFACE_ALTITUDE_THRESHOLD * 2.0:
-                    primary_reward_this_step -= WEIGHT_FUEL_EMPTY_PENALTY 
-                current_info_data['outcome_message'] = f"TRUNCATED [NO FUEL] (Stage {self.training_stage})"
-                current_info_data['fuel_ended_episode'] = True
+            # Bonus per discesa controllata (ha velocità radiale negativa moderata)
+            controlled_descent_bonus = 0.0
+            if -1.5 < radial_speed < -0.1 and altitude < NEAR_SURFACE_ALTITUDE_THRESHOLD * 2:
+                controlled_descent_bonus = 0.5 * (1.0 - abs(radial_speed + 0.7) / 0.8)
+            reward_components['controlled_descent'] = controlled_descent_bonus
             
-            tentative_score = self.current_episode_score + primary_reward_this_step # Score prima della derivata
-            if not (terminated or truncated) and tentative_score < MIN_EPISODE_SCORE_FOR_TRUNCATION:
-                truncated = True
-                current_info_data['outcome_message'] = f"TRUNCATED [SCORE LOW ({tentative_score:.0f})] (Stage {self.training_stage})"
-                current_info_data['low_score_truncation'] = True
-
-            # Fuel efficiency bonus (se l'episodio finisce per una ragione diversa da "fuel_empty")
-            if (terminated or truncated) and not self.fuel_empty:
-                fuel_efficiency_bonus = (self.current_fuel / INITIAL_FUEL_MASS) * 50 
-                primary_reward_this_step += fuel_efficiency_bonus
+            # Incentivo per avvicinarsi al punto di atterraggio (se definito)
+            approach_reward = 0.0
+            if self.landing_target_display_pos is not None:
+                dist_to_landing_target = np.linalg.norm(self.ship_pos - np.array(self.landing_target_display_pos))
+                if hasattr(self, 'previous_dist_to_marker') and self.previous_dist_to_marker != float('inf'):
+                    approach_reward = 0.2 * (self.previous_dist_to_marker - dist_to_landing_target)
+                self.previous_dist_to_marker = dist_to_landing_target
+                info['dist_to_landing_target'] = dist_to_landing_target
+            reward_components['approach_target'] = approach_reward
         
-        # --- Calcolo della componente derivativa della ricompensa ---
-        reward_derivative_value = primary_reward_this_step - self.last_primary_reward_for_derivative
-        derivative_bonus = WEIGHT_REWARD_DERIVATIVE * reward_derivative_value
-        final_reward_for_agent = primary_reward_this_step + derivative_bonus
-        self.last_primary_reward_for_derivative = primary_reward_this_step
-
-        # --- 5. Aggiornamento Score Finale e Info Finali ---
-        self.current_episode_score += final_reward_for_agent
-
-        current_info_data['reward_comp_primary'] = primary_reward_this_step
-        current_info_data['reward_comp_derivative_raw_diff'] = reward_derivative_value
-        current_info_data['reward_comp_derivative_bonus'] = derivative_bonus
-        current_info_data['reward_step'] = final_reward_for_agent
-        current_info_data['landed_successfully'] = landed_successfully
-        current_info_data['crashed'] = crashed
-        current_info_data['fuel_consumed_step'] = fuel_consumed_this_step
-        # Assicurati che 'out_of_bounds', 'timeout', 'fuel_ended_episode', 'low_score_truncation' siano in current_info_data se si verificano
-        if 'out_of_bounds' not in current_info_data: current_info_data['out_of_bounds'] = False # Ensure keys exist
-        if 'timeout' not in current_info_data: current_info_data['timeout'] = False
-        if 'fuel_ended_episode' not in current_info_data: current_info_data['fuel_ended_episode'] = False
-        if 'low_score_truncation' not in current_info_data: current_info_data['low_score_truncation'] = False
-
-        current_info_data['total_episode_score'] = self.current_episode_score
+        # --- Gestione contatto con la superficie ---
+        if touched_surface:
+            # Per Stage 1/2, contatto = crash (terminazione negativa)
+            if self.training_stage in [1, 2]:
+                reward_components['crash_penalty'] = -100.0
+                terminated = True
+                info['reason'] = 'crashed'
+                info['crashed'] = True
+            
+            # Per Stage 3, valuta se è un buon atterraggio o un crash
+            elif self.training_stage == 3:
+                landing_success = (
+                    abs(radial_speed) < 1.5 and  # Velocità verticale bassa
+                    abs(tangential_speed) < 1.0 and  # Velocità orizzontale bassa
+                    angle_error < LANDING_ANGLE_LIMIT  # Angolo vicino alla verticale
+                )
+                
+                if landing_success:
+                    landing_bonus = 500.0
+                    # Bonus extra per atterraggio preciso se c'è un target
+                    precision_bonus = 0.0
+                    if self.landing_target_display_pos is not None:
+                        dist_to_landing_target = np.linalg.norm(self.ship_pos - np.array(self.landing_target_display_pos))
+                        precision_bonus = 200.0 * max(0, 1.0 - dist_to_landing_target / 50.0)
+                        landing_bonus += precision_bonus
+                        info['landing_precision'] = precision_bonus
+                        info['final_dist_to_target'] = dist_to_landing_target
+                    
+                    reward_components['landing_success'] = landing_bonus
+                    reward_components['landing_precision'] = precision_bonus
+                    info['reason'] = 'landed_successfully'
+                    info['landed_successfully'] = True
+                else:
+                    reward_components['crash_penalty'] = -200.0
+                    info['reason'] = 'crashed'
+                    info['crashed'] = True
+                
+                terminated = True  # In ogni caso, terminare l'episodio
+        
+        # --- Condizioni comuni di terminazione ---
+        if out_of_bounds:
+            reward_components['out_of_bounds_penalty'] = -100.0
+            truncated = True
+            info['reason'] = 'out_of_bounds'
+            info['out_of_bounds'] = True
+        
+        elif self.fuel_empty:
+            reward_components['fuel_empty_penalty'] = -50.0
+            truncated = True
+            info['reason'] = 'fuel_empty'
+            info['fuel_empty'] = True
+        
+        elif self.steps_taken >= MAX_STEPS_PER_EPISODE:
+            reward_components['max_steps_penalty'] = -10.0
+            truncated = True
+            info['reason'] = 'max_steps'
+            info['timeout'] = True
+            
+        # --- SOMMA DI TUTTE LE COMPONENTI DEL REWARD ---
+        primary_reward = sum(reward_components.values())
+        
+        # --- CALCOLO DERIVATA DEL REWARD ---
+        reward_derivative = 0.0
+        if hasattr(self, 'last_primary_reward'):
+            # Calcola la derivata come differenza tra reward attuale e precedente
+            reward_derivative = primary_reward - self.last_primary_reward
+            
+            # Applica un peso alla derivata (positivo se il reward sta migliorando)
+            if reward_derivative > 0:
+                # Bonus proporzionale al miglioramento del reward
+                derivative_bonus = WEIGHT_REWARD_DERIVATIVE * reward_derivative
+                reward_components['derivative_bonus'] = derivative_bonus
+                primary_reward += derivative_bonus
+            else:
+                # Penalità più leggera per peggioramento (per evitare di scoraggiare troppo l'esplorazione)
+                derivative_penalty = WEIGHT_REWARD_DERIVATIVE * 0.5 * reward_derivative
+                reward_components['derivative_penalty'] = derivative_penalty
+                primary_reward += derivative_penalty
+        
+        # Memorizza il reward primario per il prossimo step
+        self.last_primary_reward = primary_reward
+        reward = primary_reward
+        
+        # --- 3. Aggiorna punteggio episodio e ritorna ---
+        self.current_episode_score += reward
+        info['total_episode_score'] = self.current_episode_score
+        info['reward_step'] = reward
+        info['reward_components'] = reward_components
+        info['reward_derivative'] = reward_derivative
         
         if terminated or truncated:
-            self.episode_info = current_info_data.copy()
-            self.episode_outcome_message = current_info_data.get("outcome_message", f"EPISODE ENDED (Stage {self.training_stage})")
-            self.nn_trajectory_completed_flag_for_bonus = False
-            self.trajectory_completed_for_landing = False
-            self.is_in_targeting_mode = False
-            self.show_target_selected_message = False
-            # Qui potresti anche stampare un riepilogo dell'episodio se vuoi
-            # print(f"DEBUG: Episode End. Outcome: {self.episode_outcome_message}, Score: {self.current_episode_score:.2f}")
-
-
-        # --- 6. OSSERVAZIONE e Ritorno ---
-        observation = self._get_obs()
+            self.episode_outcome_message = info.get('reason', 'episode_ended').replace('_', ' ').title()
+            if info.get('landed_successfully', False):
+                self.episode_outcome_message = f"STAGE {self.training_stage}: Landing Successful!"
+            elif info.get('crashed', False):
+                self.episode_outcome_message = f"STAGE {self.training_stage}: Crashed!"
         
-        if not np.all(np.isfinite(observation)):
-            print(f"ERRORE: Osservazione finale non finita! {observation}. Stato: p={self.ship_pos} v={self.ship_vel} angle={self.ship_angle} fuel={self.current_fuel}. Terminazione forzata.")
-            observation = np.nan_to_num(observation, nan=0.0, posinf=self.observation_space.high, neginf=self.observation_space.low)
-            observation = np.clip(observation, self.observation_space.low, self.observation_space.high)
-            if not terminated: # Se non era già terminato per altre cause
-                error_penalty = WEIGHT_CRASH_PENALTY * 1.5
-                # Applica direttamente alla ricompensa finale dell'agente e allo score
-                final_reward_for_agent -= error_penalty 
-                self.current_episode_score -= error_penalty
-                
-                terminated = True; crashed = True; 
-                current_info_data['crashed'] = True # Aggiorna info
-                current_info_data['error_internal'] = "Invalid observation generated"
-                outcome_msg = current_info_data.get("outcome_message", "")
-                current_info_data['outcome_message'] = f"{outcome_msg} [OBS_ERR]" if outcome_msg else "CRASHED [OBS_ERR]"
-                self.episode_outcome_message = current_info_data['outcome_message']
-                if self.episode_info : self.episode_info.update(current_info_data) # Aggiorna anche le info dell'episodio
-
+        # Rendering
         if self.render_mode == "human":
-            if not hasattr(self, 'is_pygame_initialized') or not self.is_pygame_initialized:
-                self._lazy_init_pygame()
-            if hasattr(self, 'is_pygame_initialized') and self.is_pygame_initialized:
-                self._render_frame(action=actual_action, current_step_info=current_info_data)
-
-        return observation, final_reward_for_agent, terminated, truncated, current_info_data
-    
+            self._render_frame(action=action, current_step_info=info)
+        
+        observation = self._get_obs()
+        return observation, reward, terminated, truncated, info
 
     def render(self):
         if self.render_mode == "rgb_array":
@@ -2164,80 +2168,74 @@ def calculate_total_path_length(waypoints):
 
 def generate_trajectory_from_nn_prediction(current_pos_px, nn_predicted_initial_vel_px_s, nn_predicted_tof_s,
                                         pixels_per_km_env, screen_center_x_env, screen_center_y_env,
-                                        moon_radius_px_env, gravity_const_env, time_step =0.1, num_points=10):
+                                        moon_radius_px_env, gravity_const_env, time_step=0.1, num_points=10):
     """
     Genera una sequenza di waypoint basata sulla velocità iniziale e TOF predetti dalla NN.
     Simula un volo balistico (solo gravità) per la durata TOF.
-
-    Args:
-        current_pos_px (np.array): Posizione iniziale attuale del lander [x, y] in pixel.
-        nn_predicted_initial_vel_px_s (np.array): Velocità iniziale [vx, vy] del trasferimento predetta dalla NN, in pixel/s.
-        nn_predicted_tof_s (float): Tempo di volo predetto dalla NN in secondi.
-        pixels_per_km_env, screen_center_x_env, screen_center_y_env: parametri dell'ambiente.
-        moon_radius_px_env (float): Raggio della luna in pixel.
-        gravity_const_env (float): Costante gravitazionale dell'ambiente.
-        time_step  (float): Passo temporale per la simulazione della traiettoria.
-        num_points (int): Numero desiderato di punti nella traiettoria (o massimo).
-
-    Returns:
-        list: Lista di dizionari waypoint [{'t': time, 'pos': [x,y], 'vel': [vx,vy]}, ...]
-            o None se la generazione fallisce.
     """
     if nn_predicted_tof_s <= 0:
         print("ERRORE (generate_trajectory): TOF predetto non positivo.")
         return None
 
-    trajectory_waypoints  = []
+    trajectory_waypoints = []
     
-    sim_pos = np.array(current_pos_px, dtype=np.float32)
-    sim_vel = np.array(nn_predicted_initial_vel_px_s, dtype=np.float32) # USA LA VELOCITÀ INIZIALE PREDETTA DALLA NN
+    sim_pos = np.array(current_pos_px, dtype=np.float64)
+    sim_vel = np.array(nn_predicted_initial_vel_px_s, dtype=np.float64)
     
-    # Calcola il numero di step basato sul TOF e sul time_step desiderato per la traiettoria
-    # O un numero fisso di punti distribuiti lungo il TOF
-    actual_num_steps = min(num_points, int(nn_predicted_tof_s / time_step ) +1)
-    if actual_num_steps < 2: actual_num_steps = 2 # Minimo 2 punti
+    # Determina il time step per avere circa il numero di punti richiesto
+    sim_time_per_step = nn_predicted_tof_s / (num_points - 1) if num_points > 1 else nn_predicted_tof_s
     
-    sim_time_per_step = nn_predicted_tof_s / (actual_num_steps -1) if actual_num_steps > 1 else nn_predicted_tof_s
-
-
+    # Aggiungi il punto iniziale
+    trajectory_waypoints.append({
+        't': 0.0,
+        'pos': [sim_pos[0], sim_pos[1]],
+        'vel': [sim_vel[0], sim_vel[1]]
+    })
+    
     current_time = 0.0
-
-    for i in range(actual_num_steps):
-        trajectory_waypoints.append({
-            't': current_time, # Tempo relativo all'inizio di questa traiettoria simulata
-            'pos': [sim_pos[0], sim_pos[1]],
-            'vel': [sim_vel[0], sim_vel[1]]
-        })
-
-        if i == actual_num_steps - 1: # Ultimo punto
-            break
-
-        # Fisica semplificata (solo gravità) per la propagazione
+    
+    # Simula il movimento per generare i punti della traiettoria
+    for i in range(1, num_points):
+        current_time += sim_time_per_step
+        
+        # Fisica semplificata per la propagazione
         direction_to_center = np.array([screen_center_x_env, screen_center_y_env]) - sim_pos
         distance_sq = max(np.dot(direction_to_center, direction_to_center), 1.0)
         dist = np.sqrt(distance_sq)
         
+        # Calcola l'accelerazione gravitazionale
         gravity_accel = np.zeros(2)
-        if dist > 1e-6 : # Evita divisione per zero se esattamente al centro (improbabile)
+        if dist > 1e-6:
             try:
                 gravity_force_magnitude = gravity_const_env / distance_sq
                 gravity_accel = direction_to_center / dist * gravity_force_magnitude
             except (ValueError, ZeroDivisionError):
-                pass # gravity_accel rimane [0,0]
-
+                pass  # gravity_accel rimane [0,0]
+        
+        # Aggiorna velocità e posizione
         sim_vel += gravity_accel * sim_time_per_step
         sim_pos += sim_vel * sim_time_per_step
-        current_time += sim_time_per_step
         
-        # Controllo impatto (opzionale, ma utile per non farla passare attraverso la luna)
-        # dist_from_center_after_step = np.linalg.norm(sim_pos - np.array([screen_center_x_env, screen_center_y_env]))
-        # if dist_from_center_after_step <= moon_radius_px_env:
-        #     # Potresti voler terminare la traiettoria qui o gestirla
-        #     trajectory_waypoints.append({'t': current_time, 'pos': list(sim_pos), 'vel': list(sim_vel)})
-        #     print(f"WARN (generate_trajectory): Traiettoria interrotta per impatto previsto a t={current_time:.2f}s")
-        #     break 
-            
-    if not trajectory_waypoints:
+        # Controllo opzionale per impatto con la luna
+        dist_from_center = np.linalg.norm(sim_pos - np.array([screen_center_x_env, screen_center_y_env]))
+        if dist_from_center <= moon_radius_px_env:
+            trajectory_waypoints.append({
+                't': current_time,
+                'pos': [sim_pos[0], sim_pos[1]],
+                'vel': [sim_vel[0], sim_vel[1]]
+            })
+            print(f"WARN (generate_trajectory): Traiettoria interrotta per impatto previsto a t={current_time:.2f}s")
+            break
+        
+        # Aggiungi il punto attuale alla traiettoria
+        trajectory_waypoints.append({
+            't': current_time,
+            'pos': [sim_pos[0], sim_pos[1]],
+            'vel': [sim_vel[0], sim_vel[1]]
+        })
+    
+    if len(trajectory_waypoints) < 2:
+        print("ERRORE (generate_trajectory): Generata traiettoria con meno di 2 punti.")
         return None
         
     return trajectory_waypoints
@@ -2312,7 +2310,7 @@ def load_and_convert_matlab_trajectory(filepath, pixels_per_km, screen_center_x,
         return None
     except Exception as e:
         print(f"ERRORE SCONOSCIUTO durante il caricamento o la conversione della traiettoria da '{filepath}': {type(e).__name__} - {e}")
-        import traceback
+
         traceback.print_exc()
         return None
 EARTH_RADIUS_KM_MATLAB = 171.5
@@ -2338,7 +2336,7 @@ if __name__ == '__main__':
     # una funzione helper esterna o un metodo statico accessibile.
     # Assumiamo che sia una funzione globale definita prima di questo blocco __main__.
     current_training_stage = 1 # Inizia con lo stage 1
-    # --- Setup Parametri Ambiente e Autopilota PPO (Opzionale) ---
+    # - Setup Parametri Ambiente e Autopilota PPO (Opzionale) ---
     log_dir_manual = "ppo_training_runs/PPO_20250509_012618/" # Aggiorna se il percorso è diverso
     model_filename_manual = "ppo_lunar_model.zip"
     vecnormalize_filename_manual = "final_vecnormalize.pkl"
